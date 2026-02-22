@@ -15,10 +15,11 @@ import {
     FormLabel,
     Flex
 } from '@chakra-ui/react'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { Mail, Lock, CircuitBoard } from 'lucide-react'
+import { useAuth } from '@/components/auth/AuthProvider'
 
 export default function LoginPage() {
     const [email, setEmail] = useState('')
@@ -26,6 +27,13 @@ export default function LoginPage() {
     const [loading, setLoading] = useState(false)
     const toast = useToast()
     const router = useRouter()
+    const { user, loading: authLoading } = useAuth()
+
+    useEffect(() => {
+        if (!authLoading && user) {
+            router.push('/')
+        }
+    }, [user, authLoading, router])
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault()
