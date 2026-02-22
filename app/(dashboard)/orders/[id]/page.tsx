@@ -18,26 +18,11 @@ import {
 import { ArrowLeft, Printer, Package, User, Calendar, Truck } from 'lucide-react'
 import { useParams, useRouter } from 'next/navigation'
 import PickPathOptimizer from '@/components/Recommendations/PickPathOptimizer'
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
+import { Spinner, Center } from '@chakra-ui/react'
 
-// Mock Data for Order Details
-const MOCK_ORDER = {
-    id: 'ORD-001',
-    customer: {
-        name: 'Acme Corp',
-        email: 'logistics@acme.com',
-        address: '123 Industrial Way, Sector 7'
-    },
-    status: 'Pending',
-    priority: 'Normal',
-    createdAt: 'Oct 24, 2023',
-    items: [
-        { sku: 'SKU-001', name: 'Wireless Controller', quantity: 5, location: 'Zone C - Aisle 3 - Shelf 2' },
-        { sku: 'SKU-005', name: 'HDMI Cable 6ft', quantity: 10, location: 'Zone A - Aisle 1 - Shelf 5' },
-        { sku: 'SKU-012', name: 'Power Adapter', quantity: 2, location: 'Zone B - Aisle 4 - Shelf 1' },
-        { sku: 'SKU-008', name: 'USB-C Hub', quantity: 3, location: 'Zone A - Aisle 12 - Shelf 3' },
-        { sku: 'SKU-022', name: 'Monitor Stand', quantity: 1, location: 'Zone D - Aisle 1 - Shelf 1' },
-    ]
-}
+// No longer using MOCK_ORDER
 
 export default function OrderDetailsPage() {
     const params = useParams()
@@ -45,8 +30,91 @@ export default function OrderDetailsPage() {
     const bg = useColorModeValue('white', 'whiteAlpha.50')
     const borderColor = useColorModeValue('gray.200', 'gray.700')
 
-    // In a real app, fetch order by params.id
-    const order = MOCK_ORDER
+    const [order, setOrder] = useState<any>(null)
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        if (!params.id) return
+        fetchOrderDetails(params.id as string)
+    }, [params.id])
+
+    const fetchOrderDetails = async (id: string) => {
+        try {
+            // 1. Fetch Order
+            const { data: orderData, error: orderError } = await supabase
+                .from('orders')
+                .select('*')
+                .eq('id', id)
+                .single()
+
+            if (orderError) throw orderError
+
+            // 2. Fetch Order Items with Inventory and Location details
+            const { data: itemsData, error: itemsError } = await supabase
+                .from('order_items')
+                .select(`
+                    quantity_ordered,
+                    inventory_items (
+                        sku,
+                        name,
+                        inventory_stock (
+                            quantity,
+                            warehouse_locations (
+                                path,
+                                name
+                            )
+                        )
+                    )
+                `)
+                .eq('order_id', id)
+
+            if (itemsError) throw itemsError
+
+            // Format items
+            const formattedItems = itemsData.map((item: any) => {
+                const inventory = item.inventory_items
+                const stock = inventory.inventory_stock?.[0]
+                const location = stock?.warehouse_locations?.path || stock?.warehouse_locations?.name || 'Unassigned'
+
+                return {
+                    sku: inventory.sku,
+                    name: inventory.name,
+                    quantity: item.quantity_ordered,
+                    location: location
+                }
+            })
+
+            setOrder({
+                id: orderData.id,
+                order_number: orderData.order_number,
+                customer: {
+                    name: orderData.customer_name,
+                    email: `contact@${orderData.customer_name.replace(/\s+/g, '').toLowerCase()}.com`,
+                    address: 'Saved in CRM (Mock Address)'
+                },
+                status: orderData.status,
+                priority: orderData.priority,
+                createdAt: new Date(orderData.created_at).toLocaleDateString(),
+                items: formattedItems
+            })
+        } catch (error) {
+            console.error('Error fetching order:', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    if (loading) {
+        return (
+            <Center h="50vh">
+                <Spinner size="xl" />
+            </Center>
+        )
+    }
+
+    if (!order) {
+        return <Box p={10}>Order not found.</Box>
+    }
 
     return (
         <Box maxW="7xl" mx="auto" pt={5} px={{ base: 2, sm: 12, md: 17 }}>
@@ -61,8 +129,8 @@ export default function OrderDetailsPage() {
 
             <Flex justify="space-between" align="center" mb={6}>
                 <HStack>
-                    <Heading size="lg">Order #{order.id}</Heading>
-                    <Badge colorScheme="yellow" fontSize="0.9em">{order.status}</Badge>
+                    <Heading size="lg">Order {order.order_number}</Heading>
+                    <Badge colorScheme={order.status === 'pending' ? 'yellow' : order.status === 'shipped' ? 'green' : 'blue'} fontSize="0.9em">{order.status}</Badge>
                 </HStack>
                 <Button leftIcon={<Printer size={16} />} variant="outline">
                     Print Packing Slip
@@ -82,7 +150,7 @@ export default function OrderDetailsPage() {
                     >
                         <Heading size="md" mb={4}>Order Items</Heading>
                         <VStack align="stretch" spacing={0} divider={<Divider />}>
-                            {order.items.map((item) => (
+                            {order.items.map((item: any) => (
                                 <Flex key={item.sku} justify="space-between" py={3}>
                                     <HStack>
                                         <Box p={2} bg="gray.100" borderRadius="md">

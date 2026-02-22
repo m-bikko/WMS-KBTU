@@ -7,8 +7,12 @@ import {
     Text,
     useColorModeValue,
     Flex,
-    Select
+    Select,
+    Spinner,
+    Center
 } from '@chakra-ui/react'
+import { useState, useEffect } from 'react'
+import { supabase } from '@/lib/supabase'
 import {
     LineChart,
     Line,
@@ -22,27 +26,92 @@ import {
     Legend
 } from 'recharts'
 
-// Mock Data for demonstration
-const orderData = [
-    { name: 'Mon', orders: 12 },
-    { name: 'Tue', orders: 19 },
-    { name: 'Wed', orders: 15 },
-    { name: 'Thu', orders: 25 },
-    { name: 'Fri', orders: 22 },
-    { name: 'Sat', orders: 10 },
-    { name: 'Sun', orders: 8 },
-]
-
-const categoryData = [
-    { name: 'Electronics', value: 45 },
-    { name: 'HomeGoods', value: 30 },
-    { name: 'Apparel', value: 55 },
-    { name: 'Automotive', value: 20 },
-]
-
 export default function InsightsPage() {
     const bg = useColorModeValue('white', 'dark.surface')
     const borderColor = useColorModeValue('gray.200', 'dark.border')
+
+    const [orderData, setOrderData] = useState<any[]>([])
+    const [categoryData, setCategoryData] = useState<any[]>([])
+    const [aiSuggestion, setAiSuggestion] = useState<string>('Analyzing your warehouse patterns...')
+    const [loading, setLoading] = useState(true)
+
+    useEffect(() => {
+        fetchInsightsData()
+    }, [])
+
+    const fetchInsightsData = async () => {
+        try {
+            // 1. Fetch Order Volume (Group by Day for last 7 days)
+            const { data: orders } = await supabase
+                .from('orders')
+                .select('created_at')
+                .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+
+            // Default 7 days map
+            const daysMap: Record<string, number> = {}
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date()
+                d.setDate(d.getDate() - i)
+                daysMap[d.toLocaleDateString('en-US', { weekday: 'short' })] = 0
+            }
+
+            orders?.forEach(order => {
+                const day = new Date(order.created_at).toLocaleDateString('en-US', { weekday: 'short' })
+                if (daysMap[day] !== undefined) {
+                    daysMap[day] += 1
+                }
+            })
+
+            const formattedOrders = Object.keys(daysMap).map(key => ({
+                name: key,
+                orders: daysMap[key]
+            }))
+            setOrderData(formattedOrders)
+
+            // 2. Fetch Category Distribution
+            const { data: items } = await supabase
+                .from('inventory_items')
+                .select('category, quantity')
+
+            const catMap: Record<string, number> = {}
+            items?.forEach(item => {
+                catMap[item.category] = (catMap[item.category] || 0) + item.quantity
+            })
+
+            const formattedCats = Object.keys(catMap).map(key => ({
+                name: key,
+                value: catMap[key]
+            }))
+            setCategoryData(formattedCats)
+
+            // 3. Fetch latest AI Insight
+            const { data: insight } = await supabase
+                .from('daily_insights')
+                .select('content')
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .single()
+
+            if (insight) {
+                setAiSuggestion(insight.content)
+            } else {
+                setAiSuggestion('No recent AI suggestions. Generate them from the overview dashboard.')
+            }
+
+        } catch (error) {
+            console.error('Error fetching insights data', error)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    if (loading) {
+        return (
+            <Center h="50vh">
+                <Spinner size="xl" />
+            </Center>
+        )
+    }
 
     return (
         <Box maxW="7xl" mx="auto" pt={5} px={{ base: 2, sm: 12, md: 17 }}>
@@ -101,8 +170,7 @@ export default function InsightsPage() {
                 <Box position="relative" zIndex={1}>
                     <Heading size="md" color="white" mb={2}>🤖 AI Suggestion</Heading>
                     <Text color="whiteAlpha.900">
-                        Based on the order trends, picking efficiency drops by 15% on Thursdays.
-                        Consider adding an extra shift or pre-batching orders on Wednesday evenings.
+                        {aiSuggestion}
                     </Text>
                 </Box>
             </Box>
