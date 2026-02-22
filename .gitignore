@@ -1,0 +1,5 @@
+.next
+/node_modules
+.env
+PRD.txt
+next-env.d.ts
